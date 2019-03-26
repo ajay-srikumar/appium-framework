@@ -1,0 +1,51 @@
+group 'appium-test'
+version '1.0-SNAPSHOT'
+
+repositories {
+        mavenCentral()
+    }
+
+apply plugin: 'java'
+
+dependencies {
+    testCompile 'info.cukes:cucumber-java:1.2.4'
+    testCompile 'info.cukes:cucumber-junit:1.2.4'
+    testCompile 'io.appium:java-client:4.0.0'
+    compile group: 'org.springframework', name: 'spring-web', version: '3.0.2.RELEASE'
+}
+
+configurations {
+    cucumberRuntime {
+        extendsFrom testRuntime
+    }
+}
+
+task androidAppiumTests() {
+    dependsOn assemble, compileTestJava
+    doLast {
+        javaexec {
+            main = "cucumber.api.cli.Main"
+            classpath = configurations.cucumberRuntime + sourceSets.main.output + sourceSets.test.output
+            args = ['--plugin', 'pretty', '--plugin', 'html:build/report','--glue',
+                    'step_definitions', 'src/test/resources', '--tags', '@android']
+            systemProperties = System.getProperties()
+        }
+    }
+}
+
+task iosAppiumTests() {
+    dependsOn assemble, compileTestJava
+    doLast {
+        javaexec {
+            main = "cucumber.api.cli.Main"
+            classpath = configurations.cucumberRuntime + sourceSets.main.output + sourceSets.test.output
+            args = ['--plugin', 'pretty', '--plugin', 'html:build/report','--glue',
+                    'step_definitions', 'src/test/resources', '--tags', '@ios']
+            systemProperties = System.getProperties()
+        }
+    }
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '2.3'
+}

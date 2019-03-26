@@ -1,0 +1,91 @@
+node ('android-mac'){
+
+    dir ('appiumTests')
+    {
+        stage 'Checking out Appium tests source code'
+        checkout([$class: 'GitSCM', branches: [[name: '*/${BRANCH}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-appium-tests', url: 'https://gitlab.com/appium-tests.git']]])
+
+        stage 'Deleting the previous android.apk file if it exists'
+        sh "rm -rf -f apps/android.apk"
+    }
+
+    dir ('androidArtifact')
+    {
+        stage 'Copy apk artifact'
+        step([$class: 'CopyArtifact', filter: '**/app-automation-debug.apk', fingerprintArtifacts: true, flatten: true, projectName: 'android-artifacts', target: '.'])
+
+        stage 'Copying apk to the apps directory'
+        sh "cp -R app-automation-debug.apk ../appiumTests/apps/app-automation-debug.apk"
+    }
+
+
+    dir ('wiremock-server')
+    {
+        stage 'Checking out Wire mock source code'
+        checkout([$class: 'GitSCM', branches: [[name: '*/${BRANCH}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-appium-tests', url: 'https://gitlab.com/wiremock.git']]])
+
+        stage 'running mock server on port 8090'
+        dir ('app-wiremock')
+        {
+            sh "lsof -t -i tcp:8090 | xargs kill"
+            sh "sleep 3"
+            sh "mvn clean compile exec:java &"
+            sh "sleep 10"
+        }
+    }
+
+    stage 'Starting appium server'
+        sh "lsof -t -i tcp:4723 | xargs kill"
+        sh "sleep 3"
+        sh "appium &"
+        sh "sleep 10"
+
+    stage 'setting up emulator'
+        sh "(adb devices | grep emu | awk '{ print \$1}' | xargs -I{} -L 1 adb -s {} emu kill >/dev/null 2>&1) & sleep 2"
+        sh "(emulator -list-avds | grep 26 | xargs -I{} -L 1 emulator -avd {} >/dev/null 2>&1) & sleep 2"
+        sh "sleep 25"
+
+
+    try
+    {
+        dir ('appiumTests')
+        {
+            stage 'Running appium tests in Android device'
+            sh "rm -rf appiumTests/build/report/failureScreenshots"
+            sh "./gradlew androidAppiumTests -Ddevice=android"
+        }
+    }
+    catch(err)
+    {
+         stage 'publish report'
+            zip archive: true, dir: '', glob: '**/report/**', zipFile: 'android-automation-report.zip'
+
+         throw err
+    }
+
+    finally
+    {
+        stage 'Delete Android Artifacts'
+           sh "rm -rf androidArtifact"
+           sh "rm -rf android-automation-report.zip"
+
+        stage 'Killing MicroServices server running on port 11017'
+            sh "lsof -t -i tcp:11017 | xargs kill"
+
+        stage 'Killing Docker Containers and Docker'
+            sh "docker stop \$(docker ps -aq) || true"
+            sh "docker rm \$(docker ps -aq) || true"
+            sh "osascript -e 'quit app \"Docker\"'"
+            sh "sleep 20"
+
+        stage 'Killing Microservice'
+            sh "lsof -t -i tcp:11035 | xargs kill"
+
+        stage 'Killing Wiremock server running on port 8090'
+            sh "lsof -t -i tcp:8090 | xargs kill"
+
+        stage 'Killing Appium Server running on port 4723'
+            sh "lsof -t -i tcp:4723 | xargs kill"
+    }
+
+}
